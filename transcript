@@ -1,0 +1,5 @@
+# Compile of SPI.sv was successful.
+# Compile of SPI_TB.sv failed with 1 errors.
+# 2 compiles, 1 failed with 1 error.
+# Error opening C:/projects/SPI/(vlog-13069) C:/projects/SPI/SPI_TB.sv
+# Path name 'C:/projects/SPI/(vlog-13069) C:/projects/SPI/SPI_TB.sv' doesn't exist.

@@ -1,0 +1,669 @@
+`timescale 1ns/1ps
+
+module spi_tb;
+
+    // ============================================================
+    // SIGNALS
+    // ============================================================
+
+    logic clk;
+    logic rst;
+
+    logic       start;
+    logic [7:0] tx_data;
+
+    logic [7:0] rx_data;
+    logic       busy;
+    logic       done;
+
+    logic spi_cs;
+    logic spi_sclk;
+    logic spi_mosi;
+    logic spi_miso;
+
+
+    // ============================================================
+    // TEST COUNTERS
+    // ============================================================
+
+    integer pass_count;
+    integer fail_count;
+
+
+    // ============================================================
+    // SPI SLAVE MODEL
+    // ============================================================
+
+    logic [7:0] slave_rx_data;
+    integer slave_bit_count;
+
+
+    // ============================================================
+    // MANUAL COVERAGE COUNTERS
+    // ============================================================
+
+    integer start_0_count;
+    integer start_1_count;
+
+    integer busy_0_count;
+    integer busy_1_count;
+
+    integer cs_0_count;
+    integer cs_1_count;
+
+    integer mosi_0_count;
+    integer mosi_1_count;
+
+    integer miso_0_count;
+    integer miso_1_count;
+
+
+    // ============================================================
+    // DUT
+    // ============================================================
+
+    spi_master #(
+        .CLK_DIV(2)
+    ) dut (
+
+        .clk      (clk),
+        .rst      (rst),
+
+        .start    (start),
+        .tx_data  (tx_data),
+
+        .rx_data  (rx_data),
+        .busy     (busy),
+        .done     (done),
+
+        .spi_cs   (spi_cs),
+        .spi_sclk (spi_sclk),
+        .spi_mosi (spi_mosi),
+
+        .spi_miso (spi_miso)
+    );
+
+
+    // ============================================================
+    // CLOCK
+    // ============================================================
+
+    initial begin
+
+        clk = 1'b0;
+
+        forever begin
+            #5 clk = ~clk;
+        end
+
+    end
+
+
+    // ============================================================
+    // WAVEFORM
+    // ============================================================
+
+    initial begin
+
+        $dumpfile("spi.vcd");
+        $dumpvars(0, spi_tb);
+
+    end
+
+
+    // ============================================================
+    // SPI SLAVE MODEL
+    //
+    // IMPORTANT:
+    //
+    // Master samples MISO on SCLK rising edge.
+    //
+    // Therefore:
+    //
+    // 1. First MISO bit must be placed BEFORE first rising edge.
+    // 2. Slave changes MISO on falling edges.
+    //
+    // This fixes the previous one-bit shift problem.
+    // ============================================================
+
+
+    // ------------------------------------------------------------
+    // CS FALLING EDGE
+    // Start of SPI transaction
+    // ------------------------------------------------------------
+
+    always @(negedge spi_cs) begin
+
+        slave_bit_count = 0;
+
+        // Put MSB on MISO immediately
+        spi_miso = slave_rx_data[7];
+
+    end
+
+
+    // ------------------------------------------------------------
+    // SCLK FALLING EDGE
+    // Prepare next MISO bit
+    // ------------------------------------------------------------
+
+    always @(negedge spi_sclk) begin
+
+        if (spi_cs == 1'b0) begin
+
+            if (slave_bit_count < 7) begin
+
+                slave_bit_count = slave_bit_count + 1;
+
+                spi_miso = slave_rx_data[7 - slave_bit_count];
+
+            end
+            else begin
+
+                slave_bit_count = 8;
+
+                spi_miso = 1'b0;
+
+            end
+
+        end
+
+    end
+
+
+    // ------------------------------------------------------------
+    // CS RISING EDGE
+    // End of SPI transaction
+    // ------------------------------------------------------------
+
+    always @(posedge spi_cs) begin
+
+        slave_bit_count = 0;
+
+        spi_miso = 1'b0;
+
+    end
+
+
+    // ============================================================
+    // MANUAL COVERAGE
+    // ============================================================
+
+    always @(posedge clk) begin
+
+        // --------------------------------------------------------
+        // START
+        // --------------------------------------------------------
+
+        if (start == 1'b0) begin
+            start_0_count = start_0_count + 1;
+        end
+        else begin
+            start_1_count = start_1_count + 1;
+        end
+
+
+        // --------------------------------------------------------
+        // BUSY
+        // --------------------------------------------------------
+
+        if (busy == 1'b0) begin
+            busy_0_count = busy_0_count + 1;
+        end
+        else begin
+            busy_1_count = busy_1_count + 1;
+        end
+
+
+        // --------------------------------------------------------
+        // CS
+        // --------------------------------------------------------
+
+        if (spi_cs == 1'b0) begin
+            cs_0_count = cs_0_count + 1;
+        end
+        else begin
+            cs_1_count = cs_1_count + 1;
+        end
+
+
+        // --------------------------------------------------------
+        // MOSI
+        // --------------------------------------------------------
+
+        if (spi_mosi == 1'b0) begin
+            mosi_0_count = mosi_0_count + 1;
+        end
+        else begin
+            mosi_1_count = mosi_1_count + 1;
+        end
+
+
+        // --------------------------------------------------------
+        // MISO
+        // --------------------------------------------------------
+
+        if (spi_miso == 1'b0) begin
+            miso_0_count = miso_0_count + 1;
+        end
+        else begin
+            miso_1_count = miso_1_count + 1;
+        end
+
+    end
+
+
+    // ============================================================
+    // ASSERTION 1
+    //
+    // CS MUST BE HIGH WHEN MASTER IS IDLE
+    // ============================================================
+
+    always @(posedge clk) begin
+
+        if (busy == 1'b0) begin
+
+            assert (spi_cs == 1'b1)
+            else
+                $error(
+                    "ASSERTION FAILED: CS LOW WHILE MASTER IDLE"
+                );
+
+        end
+
+    end
+
+
+    // ============================================================
+    // ASSERTION 2
+    //
+    // SCLK MUST BE LOW WHEN CS IS HIGH
+    // ============================================================
+
+    always @(posedge clk) begin
+
+        if (spi_cs == 1'b1) begin
+
+            assert (spi_sclk == 1'b0)
+            else
+                $error(
+                    "ASSERTION FAILED: SCLK HIGH WHILE CS HIGH"
+                );
+
+        end
+
+    end
+
+
+    // ============================================================
+    // SPI TRANSFER TASK
+    // ============================================================
+
+    task spi_transfer;
+
+        input [7:0] tx_value;
+        input [7:0] expected_rx;
+
+        begin
+
+            // ----------------------------------------------------
+            // Wait for falling clock edge
+            // ----------------------------------------------------
+
+            @(negedge clk);
+
+
+            // ----------------------------------------------------
+            // Apply TX data
+            // ----------------------------------------------------
+
+            tx_data = tx_value;
+
+
+            // ----------------------------------------------------
+            // Start transaction
+            // ----------------------------------------------------
+
+            start = 1'b1;
+
+
+            // ----------------------------------------------------
+            // Keep start high for one clock
+            // ----------------------------------------------------
+
+            @(negedge clk);
+
+            start = 1'b0;
+
+
+            // ----------------------------------------------------
+            // Wait for DUT to finish
+            // ----------------------------------------------------
+
+            wait(done == 1'b1);
+
+
+            // ----------------------------------------------------
+            // Allow RX data to settle
+            // ----------------------------------------------------
+
+            #2;
+
+
+            // ----------------------------------------------------
+            // Check RX data
+            // ----------------------------------------------------
+
+            if (rx_data == expected_rx) begin
+
+                $display(
+                    "SPI TRANSFER TX=%02h RX=%02h EXPECTED=%02h : PASS",
+                    tx_value,
+                    rx_data,
+                    expected_rx
+                );
+
+                pass_count = pass_count + 1;
+
+            end
+            else begin
+
+                $display(
+                    "SPI TRANSFER TX=%02h RX=%02h EXPECTED=%02h : FAIL",
+                    tx_value,
+                    rx_data,
+                    expected_rx
+                );
+
+                fail_count = fail_count + 1;
+
+            end
+
+
+            // ----------------------------------------------------
+            // Wait before next transfer
+            // ----------------------------------------------------
+
+            @(negedge clk);
+
+        end
+
+    endtask
+
+
+    // ============================================================
+    // MAIN TEST
+    // ============================================================
+
+    initial begin
+
+
+        // ========================================================
+        // INITIALIZATION
+        // ========================================================
+
+        pass_count = 0;
+        fail_count = 0;
+
+        start_0_count = 0;
+        start_1_count = 0;
+
+        busy_0_count = 0;
+        busy_1_count = 0;
+
+        cs_0_count = 0;
+        cs_1_count = 0;
+
+        mosi_0_count = 0;
+        mosi_1_count = 0;
+
+        miso_0_count = 0;
+        miso_1_count = 0;
+
+        start = 1'b0;
+
+        tx_data = 8'h00;
+
+        slave_rx_data = 8'h3C;
+
+        slave_bit_count = 0;
+
+        spi_miso = 1'b0;
+
+
+        // ========================================================
+        // RESET
+        // ========================================================
+
+        rst = 1'b1;
+
+        #30;
+
+        rst = 1'b0;
+
+        #20;
+
+
+        // ========================================================
+        // TEST 1
+        // ========================================================
+
+        $display("");
+        $display("======================================");
+        $display("TEST 1");
+        $display("TX DATA       = A5");
+        $display("SLAVE RX DATA = 3C");
+        $display("======================================");
+
+        slave_rx_data = 8'h3C;
+
+        spi_transfer(
+            8'hA5,
+            8'h3C
+        );
+
+
+        // ========================================================
+        // TEST 2
+        // ========================================================
+
+        $display("");
+        $display("======================================");
+        $display("TEST 2");
+        $display("TX DATA       = 55");
+        $display("SLAVE RX DATA = AA");
+        $display("======================================");
+
+        slave_rx_data = 8'hAA;
+
+        spi_transfer(
+            8'h55,
+            8'hAA
+        );
+
+
+        // ========================================================
+        // TEST 3
+        // ========================================================
+
+        $display("");
+        $display("======================================");
+        $display("TEST 3");
+        $display("TX DATA       = FF");
+        $display("SLAVE RX DATA = 5A");
+        $display("======================================");
+
+        slave_rx_data = 8'h5A;
+
+        spi_transfer(
+            8'hFF,
+            8'h5A
+        );
+
+
+        // ========================================================
+        // TEST 4
+        // ========================================================
+
+        $display("");
+        $display("======================================");
+        $display("TEST 4");
+        $display("TX DATA       = 00");
+        $display("SLAVE RX DATA = C3");
+        $display("======================================");
+
+        slave_rx_data = 8'hC3;
+
+        spi_transfer(
+            8'h00,
+            8'hC3
+        );
+
+
+        // ========================================================
+        // WAIT
+        // ========================================================
+
+        #50;
+
+
+        // ========================================================
+        // VERIFICATION SUMMARY
+        // ========================================================
+
+        $display("");
+        $display("==============================================");
+        $display("          SPI VERIFICATION SUMMARY");
+        $display("==============================================");
+
+        $display("PASS COUNT = %0d", pass_count);
+        $display("FAIL COUNT = %0d", fail_count);
+
+
+        if (fail_count == 0) begin
+
+            $display("RESULT     = ALL TESTS PASSED");
+
+        end
+        else begin
+
+            $display("RESULT     = VERIFICATION FAILED");
+
+        end
+
+
+        // ========================================================
+        // COVERAGE SUMMARY
+        // ========================================================
+
+        $display("");
+        $display("==============================================");
+        $display("             COVERAGE SUMMARY");
+        $display("==============================================");
+
+
+        // --------------------------------------------------------
+        // START COVERAGE
+        // --------------------------------------------------------
+
+        $display("");
+        $display("START COVERAGE");
+
+        $display(
+            "start = 0 : %0d hits",
+            start_0_count
+        );
+
+        $display(
+            "start = 1 : %0d hits",
+            start_1_count
+        );
+
+
+        // --------------------------------------------------------
+        // BUSY COVERAGE
+        // --------------------------------------------------------
+
+        $display("");
+        $display("BUSY COVERAGE");
+
+        $display(
+            "busy = 0  : %0d hits",
+            busy_0_count
+        );
+
+        $display(
+            "busy = 1  : %0d hits",
+            busy_1_count
+        );
+
+
+        // --------------------------------------------------------
+        // CS COVERAGE
+        // --------------------------------------------------------
+
+        $display("");
+        $display("CS COVERAGE");
+
+        $display(
+            "CS = 0    : %0d hits",
+            cs_0_count
+        );
+
+        $display(
+            "CS = 1    : %0d hits",
+            cs_1_count
+        );
+
+
+        // --------------------------------------------------------
+        // MOSI COVERAGE
+        // --------------------------------------------------------
+
+        $display("");
+        $display("MOSI COVERAGE");
+
+        $display(
+            "MOSI = 0  : %0d hits",
+            mosi_0_count
+        );
+
+        $display(
+            "MOSI = 1  : %0d hits",
+            mosi_1_count
+        );
+
+
+        // --------------------------------------------------------
+        // MISO COVERAGE
+        // --------------------------------------------------------
+
+        $display("");
+        $display("MISO COVERAGE");
+
+        $display(
+            "MISO = 0  : %0d hits",
+            miso_0_count
+        );
+
+        $display(
+            "MISO = 1  : %0d hits",
+            miso_1_count
+        );
+
+
+        $display("");
+        $display("==============================================");
+
+
+        // ========================================================
+        // END SIMULATION
+        // ========================================================
+
+        #20;
+
+        $finish;
+
+    end
+
+endmodule
